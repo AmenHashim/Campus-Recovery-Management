@@ -1,0 +1,71 @@
+FROM dunglas/frankenphp:php8.4-bookworm
+
+WORKDIR /app
+
+# Installing required PHP extensions
+RUN install-php-extensions \
+    pdo_mysql \
+    mbstring \
+    bcmath \
+    intl \
+    opcache
+
+# Installing Composer
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+# Copying the application
+COPY . .
+
+# Installing Laravel dependencies
+RUN composer install \
+    --no-dev \
+    --optimize-autoloader \
+    --no-interaction \
+    --prefer-dist
+
+# Installing Node.js
+FROM node:22-bookworm AS frontend
+
+WORKDIR /app
+
+COPY package*.json ./
+
+RUN npm ci
+
+COPY resources ./resources
+COPY public ./public
+COPY vite.config.js ./
+COPY tailwind.config.js ./
+COPY postcss.config.js ./
+
+RUN npm run build
+
+# Final image
+FROM dunglas/frankenphp:php8.4-bookworm
+
+WORKDIR /app
+
+RUN install-php-extensions \
+    pdo_mysql \
+    mbstring \
+    bcmath \
+    intl \
+    opcache
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+COPY . .
+
+RUN composer install \
+    --no-dev \
+    --optimize-autoloader \
+    --no-interaction \
+    --prefer-dist
+
+COPY --from=frontend /app/public/build ./public/build
+
+RUN chown -R www-data:www-data storage bootstrap/cache
+
+ENV SERVER_NAME=:80
+
+CMD ["frankenphp", "php-server", "--root", "/app/public", "--listen", ":80"]
